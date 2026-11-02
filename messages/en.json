@@ -82,7 +82,9 @@
         "rerankedDocs": "Reranked ({count})",
         "sources": "{count, plural, one {# source} other {# sources}}",
         "relevanceScore": "Relevance score",
-        "toolCalls": "{count, plural, one {# tool call} other {# tool calls}}",
+        "toolCalls": "Performed {count, plural, one {# tool call} other {# tool calls}}",
+        "toolCallsOngoing": "Performed {count, plural, one {# tool call} other {# tool calls}} \u2026",
+        "performingToolCall": "Performing tool call \u2026",
         "toolCallFailed": "failed",
         "recoveredFromText": "recovered from text",
         "copyMessage": "Copy message",
@@ -477,6 +479,9 @@
             "modelMcpToolChoice": "Tool choice",
             "modelMcpToolChoiceHint": "Never is a kill switch for this model.",
             "mcpToolChoiceInherit": "Inherit",
+            "mcpToolTracePlacementInherit": "Inherit (inline)",
+            "mcpToolTracePlacementInline": "Inline with the text",
+            "mcpToolTracePlacementEnd": "Below the answer",
             "mcpToolChoiceAuto": "Auto",
             "mcpToolChoiceNone": "Never",
             "mcpToolChoiceRequired": "Always",
@@ -503,6 +508,7 @@
             "toolChoice": "Tool choice",
             "systemNote": "Tools system note",
             "guardLeakedMarkup": "Recover leaked markup from text",
+            "toolTracePlacement": "Tool call placement",
             "serverEnabled": "Enabled"
         }
     },

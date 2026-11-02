@@ -82,7 +82,9 @@
         "rerankedDocs": "Reclassement ({count})",
         "sources": "{count, plural, one {# source} other {# sources}}",
         "relevanceScore": "Score de pertinence",
-        "toolCalls": "{count, plural, one {# appel d'outil} other {# appels d'outil}}",
+        "toolCalls": "Exécuté {count, plural, one {# appel d'outil} other {# appels d'outil}}",
+        "toolCallsOngoing": "Exécuté {count, plural, one {# appel d'outil} other {# appels d'outil}} \u2026",
+        "performingToolCall": "Appel d'outil en cours \u2026",
         "toolCallFailed": "échec",
         "recoveredFromText": "récupéré depuis le texte",
         "copyMessage": "Copier le message",
@@ -477,6 +479,9 @@
             "modelMcpToolChoice": "Choix d'outil",
             "modelMcpToolChoiceHint": "« Jamais » désactive les outils pour ce modèle.",
             "mcpToolChoiceInherit": "Par défaut",
+            "mcpToolTracePlacementInherit": "Par défaut (inline)",
+            "mcpToolTracePlacementInline": "Dans le texte",
+            "mcpToolTracePlacementEnd": "Sous la réponse",
             "mcpToolChoiceAuto": "Auto",
             "mcpToolChoiceNone": "Jamais",
             "mcpToolChoiceRequired": "Toujours",
@@ -503,6 +508,7 @@
             "toolChoice": "Choix d'outil",
             "systemNote": "Note système sur les outils",
             "guardLeakedMarkup": "Récupération du balisage fui dans le texte",
+            "toolTracePlacement": "Placement des appels d’outils",
             "serverEnabled": "Activé"
         }
     },

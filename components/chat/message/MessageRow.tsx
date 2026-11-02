@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { memo, useState } from "react";
+import { Fragment, memo, useState } from "react";
 
 import { AttachmentThumb } from "@/components/chat/composer/ComposerAttachments";
 import { ChapterMessage } from "@/components/chat/message/ChapterMessage";
@@ -22,6 +22,7 @@ import { useResolvedModel } from "@/hooks/useResolvedModel";
 import { useChatInstance } from "@/lib/chat/context";
 import { errorText } from "@/lib/chat/errors";
 import { resolveModalityGate } from "@/lib/chat/modalities";
+import { splitContentWithTraces } from "@/lib/chat/tracePlacement";
 import type { StreamingState } from "@/lib/stores/chat";
 import type { MessageNode } from "@/types/chat";
 
@@ -126,7 +127,15 @@ function AssistantMessage({
     const reasoning = streaming ? streaming.reasoning : (node.reasoningContent ?? "");
     const rag = streaming ? streaming.rag : node.rag;
     const tools = streaming ? streaming.tools : node.tools;
-    const isThinking = Boolean(streaming && reasoning && !content);
+    const { entry } = useResolvedModel();
+    const inlineTrace = (entry?.mcp?.toolTracePlacement ?? "inline") !== "end";
+    const reasoningSegs = streaming ? streaming.reasoningSegments : node.reasoningSegments;
+    const inlineActive = inlineTrace && Boolean(tools && tools.length > 0);
+    const inlineReasoning = inlineActive && Boolean(reasoningSegs && reasoningSegs.length > 0);
+    const segments =
+        inlineActive && tools ? splitContentWithTraces(content, tools, reasoningSegs) : null;
+    const liveThinking = Boolean(streaming?.reasoningSegments?.at(-1)?.pending);
+    const isThinking = Boolean(streaming && reasoning && (!content || liveThinking));
     const isWaiting = Boolean(streaming && !content && !reasoning);
 
     if (editing) {
@@ -147,7 +156,7 @@ function AssistantMessage({
 
     return (
         <div className="group/message select-none" {...longPress.handlers}>
-            <ReasoningBlock reasoning={reasoning} isThinking={isThinking} />
+            {!inlineReasoning && <ReasoningBlock reasoning={reasoning} isThinking={isThinking} />}
             <SearchProgress rag={rag} isStreaming={Boolean(streaming)} />
             {isWaiting && (
                 <div className="flex items-center gap-1.5 py-2" aria-hidden="true">
@@ -156,13 +165,44 @@ function AssistantMessage({
                     <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground [animation-delay:300ms]" />
                 </div>
             )}
-            {content && (
-                <div className="select-text" data-assistant-content data-message-id={node.id}>
-                    <MarkdownRenderer content={content} />
-                </div>
-            )}
+            {content || tools ? (
+                segments ? (
+                    <div className="select-text" data-assistant-content data-message-id={node.id}>
+                        {segments.map((segment, index) => (
+                            <Fragment key={index}>
+                                {segment.text && <MarkdownRenderer content={segment.text} />}
+                                {segment.groups.map((group, groupIndex) => (
+                                    <Fragment key={groupIndex}>
+                                        {group.calls.length > 0 && (
+                                            <ToolTraceBlock trace={group.calls} />
+                                        )}
+                                        {group.reasoning && (
+                                            <ReasoningBlock
+                                                reasoning={group.reasoning}
+                                                isThinking={Boolean(group.reasoningThinking)}
+                                            />
+                                        )}
+                                    </Fragment>
+                                ))}
+                            </Fragment>
+                        ))}
+                    </div>
+                ) : (
+                    <>
+                        {content && (
+                            <div
+                                className="select-text"
+                                data-assistant-content
+                                data-message-id={node.id}
+                            >
+                                <MarkdownRenderer content={content} />
+                            </div>
+                        )}
+                        <ToolTraceBlock trace={tools} />
+                    </>
+                )
+            ) : null}
             <Sources rag={rag} content={content} />
-            <ToolTraceBlock trace={tools} />
             {node.error && !streaming && (
                 <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                     {errorText(t, node)}
