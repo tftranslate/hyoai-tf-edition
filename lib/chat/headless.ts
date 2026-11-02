@@ -1,3 +1,4 @@
+import { detectLeakedMarkupBlock } from "@/lib/chat/leakedtoolcall";
 import {
     appendToolRound,
     applyToolSystemNote,
@@ -147,12 +148,29 @@ export async function runHeadless(
             const activeRegistry = turn < maxTurns ? registry : null;
             params.tools = activeRegistry ? toolSpecs : undefined;
             params.toolChoice = activeRegistry ? mcpConfig?.toolChoice : undefined;
+            const textBefore = text.length;
             const pass = await runToolPass(entry, params, signal, (event) => {
                 if (event.type === "content") {
                     text += event.text;
                     cb.onChunk(event.text);
                 }
             });
+            if (
+                activeRegistry &&
+                !pass.error &&
+                pass.toolCalls.length === 0 &&
+                mcpConfig?.guardLeakedMarkup !== false
+            ) {
+                const leaked = detectLeakedMarkupBlock(
+                    text,
+                    toolSpecs.map((spec) => spec.function.name),
+                );
+                if (leaked) {
+                    text = text.slice(0, text.indexOf(leaked.raw)).trimEnd();
+                    pass.finishReason = "tool_calls";
+                    pass.toolCalls.push(...leaked.calls);
+                }
+            }
             if (activeRegistry && pass.finishReason === "tool_calls" && pass.toolCalls.length > 0) {
                 const results: McpToolResult[] = [];
                 for (const call of pass.toolCalls) {
@@ -180,6 +198,18 @@ export async function runHeadless(
             }
             if (pass.error) {
                 fail(pass.error.message);
+                return;
+            }
+            if (pass.finishReason === "truncated") {
+                fail("the stream closed before the response finished");
+                return;
+            }
+            if (pass.finishReason === "tool_calls" && pass.toolCalls.length === 0) {
+                fail("the tool call request was not delivered in the response");
+                return;
+            }
+            if (pass.finishReason !== "tool_calls" && text.length === textBefore) {
+                fail("the model ended the response without generating any content");
                 return;
             }
             done();

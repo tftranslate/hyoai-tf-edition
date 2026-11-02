@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 
 import { measureCharsPerToken } from "@/lib/api/tokenize";
+import { detectLeakedMarkupBlock } from "@/lib/chat/leakedtoolcall";
 import * as lifecycle from "@/lib/chat/lifecycle";
 import * as modelOps from "@/lib/chat/model";
 import type { ChatModelSelection } from "@/lib/chat/model";
@@ -422,7 +423,7 @@ export class ChatInstance {
                     tools: toolTrace.length > 0 ? [...toolTrace] : undefined,
                     firstTokenAt,
                     usage: {
-                        promptTokens: stats.promptTokens,
+                        promptTokens: stats.lastPromptTokens ?? stats.promptTokens,
                         completionTokens: stats.completionTokens,
                         tokensPerSecond: stats.tokensPerSecond,
                     },
@@ -471,6 +472,7 @@ export class ChatInstance {
                     break;
                 case "usage":
                     stats.promptTokens = (stats.promptTokens ?? 0) + event.usage.promptTokens;
+                    stats.lastPromptTokens = event.usage.promptTokens;
                     stats.completionTokens =
                         (stats.completionTokens ?? 0) + event.usage.completionTokens;
                     queueFlush();
@@ -529,6 +531,11 @@ export class ChatInstance {
             }
 
             let turn = 0;
+            // Did the final pass deliver anything at all (content, reasoning or
+            // structured calls)? A run that ends with stop and an empty final
+            // pass must surface as a failure, not as a completed answer.
+            let lastPassProduced = true;
+            let lastPassToolCalls = 0;
             for (;;) {
                 const activeRegistry = turn < maxTurns ? registry : null;
                 params.tools = activeRegistry ? toolSpecs : undefined;
@@ -572,6 +579,43 @@ export class ChatInstance {
                     queueFlush();
                     continue;
                 }
+                // A chat parser that failed to intercept a markup encoded
+                // invocation block (stranded stop) leaks it into the plain
+                // text channel. When the pass carries no structured
+                // invocations at all, recover a validated trailing block and
+                // let the round run through the normal execution path.
+                if (
+                    activeRegistry &&
+                    !pass.error &&
+                    pass.toolCalls.length === 0 &&
+                    mcpConfig?.guardLeakedMarkup !== false
+                ) {
+                    const leaked = detectLeakedMarkupBlock(
+                        content.slice(contentBefore),
+                        toolSpecs.map((spec) => spec.function.name),
+                    );
+                    if (leaked) {
+                        content = content.slice(0, contentBefore + leaked.prefix.length);
+                        queueFlush();
+                        toolTrace.push({
+                            name:
+                                "recovered:" +
+                                leaked.calls.map((call) => call.function.name).join(", "),
+                            args: truncateTraceField(leaked.raw, TRACE_RESULT_MAX),
+                            result: "recovered from the text channel",
+                            ms: 0,
+                            recovered: true,
+                        });
+                        pass.finishReason = "tool_calls";
+                        finishReason = "tool_calls";
+                        pass.toolCalls.push(...leaked.calls);
+                    }
+                }
+                lastPassProduced =
+                    content.length > contentBefore ||
+                    reasoning.length > reasoningBefore ||
+                    pass.toolCalls.length > 0;
+                lastPassToolCalls = pass.toolCalls.length;
                 if (
                     !activeRegistry ||
                     finishReason !== "tool_calls" ||
@@ -613,9 +657,21 @@ export class ChatInstance {
                 turn += 1;
             }
 
-            if (finishReason === "truncated" && nodeError === undefined) {
-                nodeError = "the stream closed before the response finished";
-                errorKind = "stream";
+            // A run that ends without the final pass producing anything, or with
+            // a tool-call request that never arrived on the structured channel
+            // (and could not be recovered from the text channel), is a failure:
+            // report it instead of closing the turn as completed.
+            if (nodeError === undefined) {
+                if (finishReason === "truncated") {
+                    nodeError = "the stream closed before the response finished";
+                    errorKind = "stream";
+                } else if (finishReason === "tool_calls" && lastPassToolCalls === 0) {
+                    nodeError = "the tool call request was not delivered in the response";
+                    errorKind = "stream";
+                } else if (!lastPassProduced) {
+                    nodeError = "the model ended the response without generating any content";
+                    errorKind = "stream";
+                }
             }
         } catch (error) {
             if (error instanceof ApiError && error.kind === "aborted") {
@@ -631,6 +687,7 @@ export class ChatInstance {
         } finally {
             this.abortRef = null;
             const completed =
+                nodeError === undefined &&
                 finishReason !== "aborted" &&
                 finishReason !== "error" &&
                 finishReason !== "truncated";
